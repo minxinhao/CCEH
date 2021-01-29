@@ -43,7 +43,7 @@ int main (int argc, char* argv[])
     int numData = atoi(argv[2]);
 #ifdef MULTITHREAD
     int numThreads = atoi(argv[3]);
-#endif
+#endif/home/minxinhao/CCEH/CCEH-PMDK/src
     struct timespec start, end;
     uint64_t elapsed;
     PMEMobjpool* pop;
@@ -80,7 +80,7 @@ int main (int argc, char* argv[])
     uint64_t* keys = new uint64_t[numData];
 
     ifstream ifs;
-    string dataset = "/home/chahg0129/dataset/input_rand.txt";
+    string dataset = "/home/minxinhao/CCEH/CCEH-PMDK/src/input_rand.txt";
     ifs.open(dataset);
     if (!ifs){
 	cerr << "No file." << endl;
