@@ -65,16 +65,16 @@ struct Segment{
 	sema = 0;
     }
 
-    bool suspend(void){
+    bool suspend(void){			// barrier 等待sema被重新设置为-sema-1
 	int64_t val;
-	do{
+	do{				//竞争sema
 	    val = sema;
 	    if(val < 0)
 		return false;
-	}while(!CAS(&sema, &val, -1));
+	}while(!CAS(&sema, &val, -1));	//set成功退出
 
-	int64_t wait = 0 - val - 1;
-	while(val && sema != wait){
+	int64_t wait = 0 - val - 1; 
+	while(val && sema != wait){ //如果sema不为零则一直循环
 	    asm("nop");
 	}
 	return true;
@@ -125,10 +125,10 @@ struct Directory{
 	    val = sema;
 	    if(val < 0)
 		return false;
-	}while(!CAS(&sema, &val, -1));
+	}while(!CAS(&sema, &val, -1)); //竞争sema
 
 	int64_t wait = 0 - val - 1;
-	while(val && sema != wait){
+	while(val && sema != wait){//如果sema不为零则一直循环
 	    asm("nop");
 	}
 	return true;
@@ -137,7 +137,7 @@ struct Directory{
     bool lock(void){
 	int64_t val = sema;
 	while(val > -1){
-	    if(CAS(&sema, &val, val+1))
+	    if(CAS(&sema, &val, val+1)) //设置sema为sema+1成功
 		return true;
 	    val = sema;
 	}
@@ -146,7 +146,7 @@ struct Directory{
 
     void unlock(void){
 	int64_t val = sema;
-	while(!CAS(&sema, &val, val-1)){
+	while(!CAS(&sema, &val, val-1)){ //设置sema为sema-1成功
 	    val = sema;
 	}
     }
@@ -190,4 +190,3 @@ class CCEH{
 };
 
 #endif
-

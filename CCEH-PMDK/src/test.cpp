@@ -15,8 +15,10 @@ using namespace std;
 
 #define POOL_SIZE (10737418240) // 10GB
 
-void clear_cache() {
-    int* dummy = new int[1024*1024*256];
+//莫名其迷的分配一大块内存，进行一通赋值，然后删除
+//清空CPU cache？
+void clear_cache() { 
+    int* dummy = new int[1024*1024*256]; //256MB
     for (int i=0; i<1024*1024*256; i++) {
 	dummy[i] = i;
     }

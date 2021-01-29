@@ -16,6 +16,7 @@
 
 using namespace std;
 
+// 将key/value加入到path头部，path的内容往后顺移
 void Segment::execute_path(PMEMobjpool* pop, vector<pair<size_t, size_t>>& path, Key_t& key, Value_t value){
     for(int i=path.size()-1; i>0; --i){
 	bucket[path[i].first] = bucket[path[i-1].first];
@@ -23,10 +24,11 @@ void Segment::execute_path(PMEMobjpool* pop, vector<pair<size_t, size_t>>& path,
     }
     bucket[path[0].first].value = value;
     mfence();
-    bucket[path[0].first].key = key;
+    bucket[path[0].first].key = key; //使用key来作为插入完成标识
     pmemobj_persist(pop, (char*)&bucket[path[0].first], sizeof(Pair));
 }
 
+// 将_bucket插入到path头部，path的内容往后顺移
 void Segment::execute_path(vector<pair<size_t, size_t>>& path, Pair _bucket){
     int i = 0;
     int j = (i+1) % 2;
@@ -40,7 +42,8 @@ void Segment::execute_path(vector<pair<size_t, size_t>>& path, Pair _bucket){
 	j = (i+1) % 2;
     }
 }
-	
+
+// 在segment中按照cuckoohash方式查找target的path，找到target的移动链	
 vector<pair<size_t, size_t>> Segment::find_path(size_t target, size_t pattern){
     vector<pair<size_t, size_t>> path;
     path.reserve(kCuckooThreshold);
@@ -54,10 +57,12 @@ vector<pair<size_t, size_t>> Segment::find_path(size_t target, size_t pattern){
 	auto f_hash = hash_funcs[0](key, sizeof(Key_t), f_seed);
 	auto s_hash = hash_funcs[2](key, sizeof(Key_t), s_seed);
 
+        // sement index不匹配或者key非法，说明该处为非法数据，终止
 	if((f_hash >> (8*sizeof(f_hash) - local_depth)) != pattern || *key == INVALID){
 	    break;
 	}
 
+        // 遍历当前bucket，找到匹配key和替换路径
 	for(int j=0; j<kNumPairPerCacheLine*kNumCacheLine; ++j){
 	    auto f_idx = (((f_hash & kMask) * kNumPairPerCacheLine) + j) % kNumSlot;
 	    auto s_idx = (((s_hash & kMask) * kNumPairPerCacheLine) + j) % kNumSlot;
@@ -83,7 +88,7 @@ vector<pair<size_t, size_t>> Segment::find_path(size_t target, size_t pattern){
     return move(path);
 }
 
-
+//在当前segment loc处开始的一个bucket中寻找空闲位置存放key/value
 bool Segment::Insert4split(Key_t& key, Value_t value, size_t loc){
     for(int i=0; i<kNumPairPerCacheLine*kNumCacheLine; ++i){
 	auto slot = (loc+i) % kNumSlot;
@@ -194,10 +199,10 @@ void CCEH::Insert(PMEMobjpool* pop, Key_t& key, Value_t value){
     auto f_idx = (f_hash & kMask) * kNumPairPerCacheLine;
 
 RETRY:
-    auto x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
+    auto x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth)); // 获得global depth对应部分
     auto target = D_RO(D_RO(dir)->segment)[x];
 
-    if(!D_RO(target)){
+    if(!D_RO(target)){          //target为空，正在进行split后的设置？
 	std::this_thread::yield();
 	goto RETRY;
     }
@@ -209,18 +214,19 @@ RETRY:
     }
 
     auto target_check = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
-    if(D_RO(target) != D_RO(D_RO(D_RO(dir)->segment)[target_check])){
+    if(D_RO(target) != D_RO(D_RO(D_RO(dir)->segment)[target_check])){   //segment发生了修改
 	D_RW(target)->unlock();
 	std::this_thread::yield();
 	goto RETRY;
     }
 
-    auto pattern = (f_hash >> (8*sizeof(f_hash) - D_RO(target)->local_depth));
+    auto pattern = (f_hash >> (8*sizeof(f_hash) - D_RO(target)->local_depth));  //获取local depth对应的bucket index
     for(unsigned i=0; i<kNumPairPerCacheLine * kNumCacheLine; ++i){
 	auto loc = (f_idx + i) % Segment::kNumSlot;
 	auto _key = D_RO(target)->bucket[loc].key;
 	/* validity check for entry keys */
 	if((((hash_funcs[0](&D_RO(target)->bucket[loc].key, sizeof(Key_t), f_seed) >> (8*sizeof(f_hash)-D_RO(target)->local_depth)) != pattern) || (D_RO(target)->bucket[loc].key == INVALID)) && (D_RO(target)->bucket[loc].key != SENTINEL)){
+            // 设置为sentinel来标示对这个位置的占有，但是容易重现空间泄漏
 	    if(CAS(&D_RW(target)->bucket[loc].key, &_key, SENTINEL)){
 		D_RW(target)->bucket[loc].value = value;
 		mfence();
