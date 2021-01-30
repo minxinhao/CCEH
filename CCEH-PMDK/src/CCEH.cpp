@@ -93,6 +93,7 @@ bool Segment::Insert4split(Key_t& key, Value_t value, size_t loc){
     for(int i=0; i<kNumPairPerCacheLine*kNumCacheLine; ++i){
 	auto slot = (loc+i) % kNumSlot;
 	if(bucket[slot].key == INVALID){
+            //没有像insert时一样的占有标识位
 	    bucket[slot].key = key;
 	    bucket[slot].value = value;
 	    return 1;
@@ -101,6 +102,7 @@ bool Segment::Insert4split(Key_t& key, Value_t value, size_t loc){
     return 0;
 }
 
+// 将segment 分裂为两个新segment，并持久化
 TOID(struct Segment)* Segment::Split(PMEMobjpool* pop){
 #ifdef INPLACE
     TOID(struct Segment)* split = new TOID(struct Segment)[2];
