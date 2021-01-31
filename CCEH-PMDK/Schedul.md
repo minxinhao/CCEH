@@ -83,8 +83,8 @@ Recovery操作流程图：
     st=>start: start
     op1=>operation: ***访问directory的global depth g和其中的每个一个segment指针***
     op2=>operation: 对每一个segmet x的local depth i，对后续2^(g-i)的segment进行判断
-    cond1=>condition: ***如果后续segment y的local depth不为i，
-    op3=>operation: 更新directory指针数组中y的指针指向x***
+    cond1=>condition: ***如果后续segment y的local depth不为i***
+    op3=>operation: ***更新directory指针数组中y的指针指向x***
     e=>end: end
     st->op1->op2->cond1
     cond1(yes)->op3->e
@@ -97,7 +97,10 @@ Recovery操作流程图：
 
 Transplant single-thread , in-place and no-placement policy(linear probe or cuckoo placement) version
 
-* directory
+* Directory exists in both PM and Memory
+* The directory in the memory is used as a cache, and the update of the directory first occurs in the memory part, and then periodically synchronized to the PM,
+  * Only when the directory performs double resize, the global depth and segment arrays saved in the directory are synchronized to the PM,
+  * When a normal segment split occurs, update the first pointer of the segment array in the diretory in the PM (because the data of the subsequent segment will be synchronized according to the information of the first segment during recovery, so inconsistencies can be detected)
 
 
 
