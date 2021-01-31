@@ -187,6 +187,7 @@ class CCEH{
 	bool crashed = true;
     private:
 	TOID(struct Directory) dir;
+	struct Directory * mem_dir;
 };
 
 #endif
