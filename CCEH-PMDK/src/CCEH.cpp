@@ -170,6 +170,28 @@ TOID(struct Segment)* Segment::Split(PMEMobjpool* pop){
 #endif
 }
 
+void CCEH::ReadPMDir(){
+        memcpy(mem_dir->segment,D_RO(D_RO(dir)->segment),sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+        mem_dir->capacity = D_RO(dir)->capacity;
+        mem_dir->depth = D_RO(dir)->depth; //success flag
+        mem_dir->sema = 0; //expect non-zero sema before this line to suspend other proccess
+}
+
+void CCEH::FlushMemDir(PMEMobjpool* pop){
+    TOID(struct Directory) _dir;
+    POBJ_ALLOC(pop, &_dir, struct Directory, sizeof(struct Directory), NULL, NULL);
+    POBJ_ALLOC(pop, &D_RO(_dir)->segment, TOID(struct Segment), sizeof(TOID(struct Segment))*mem_dir->capacity, NULL, NULL);    
+
+    pmemobj_memcpy_persist(pop,D_RM(_dir)->segment,mem_dir->segment,sizeof(TOID(struct Segment))*mem_dir->capacity);
+    D_RM(_dir)->capacity = mem_dir->capacity;
+    D_RM(_dir)->depth = mem_dir->depth;
+    D_RM(_dir)->sema = 0;
+    pmemobj_persist(pop,D_RM(_dir),sizeof(struct Directory));
+
+    dir = _dir;
+    pmemobj_persist(pop, (char*)&dir, sizeof(TOID(struct Directory)));
+} 
+
 
 void CCEH::initCCEH(PMEMobjpool* pop){
     crashed = true;
@@ -181,6 +203,10 @@ void CCEH::initCCEH(PMEMobjpool* pop){
 	POBJ_ALLOC(pop, &D_RO(D_RO(dir)->segment)[i], struct Segment, sizeof(struct Segment), NULL, NULL);
 	D_RW(D_RW(D_RW(dir)->segment)[i])->initSegment();
     }
+
+    mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
+    mem_dir->segment = (TOID(struct Segment)*)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+    ReadPMDir();
 }
 
 void CCEH::initCCEH(PMEMobjpool* pop, size_t initCap){
@@ -193,16 +219,20 @@ void CCEH::initCCEH(PMEMobjpool* pop, size_t initCap){
 	POBJ_ALLOC(pop, &D_RO(D_RO(dir)->segment)[i], struct Segment, sizeof(struct Segment), NULL, NULL);
 	D_RW(D_RW(D_RW(dir)->segment)[i])->initSegment(static_cast<size_t>(log2(initCap)));
     }
+
+    mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
+    mem_dir->segment = (TOID(struct Segment)*)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+    ReadPMDir();
 }
- 
+
 void CCEH::Insert(PMEMobjpool* pop, Key_t& key, Value_t value){
 
     auto f_hash = hash_funcs[0](&key, sizeof(Key_t), f_seed);
     auto f_idx = (f_hash & kMask) * kNumPairPerCacheLine;
 
 RETRY:
-    auto x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth)); // 获得global depth对应部分
-    auto target = D_RO(D_RO(dir)->segment)[x];
+    auto x = (f_hash >> (8*sizeof(f_hash) - mem_dir->depth)); // 获得global depth对应部分
+    auto target = D_RO(mem_dir->segment)[x];
 
     if(!D_RO(target)){          //target为空，正在进行split后的设置？
 	std::this_thread::yield();
@@ -215,8 +245,8 @@ RETRY:
 	goto RETRY;
     }
 
-    auto target_check = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
-    if(D_RO(target) != D_RO(D_RO(D_RO(dir)->segment)[target_check])){   //segment发生了修改
+    auto target_check = (f_hash >> (8*sizeof(f_hash) - mem_dir->depth));
+    if(D_RO(target) != D_RO(D_RO(mem_dir->segment)[target_check])){   //segment发生了修改
 	D_RW(target)->unlock();
 	std::this_thread::yield();
 	goto RETRY;
@@ -277,7 +307,7 @@ RETRY:
 	goto RETRY;
     }
 #else
-    if(target_local_depth != D_RO(D_RO(D_RO(dir)->segment)[x])->local_depth){
+    if(target_local_depth != D_RO(D_RO(mem_dir->segment)[x])->local_depth){
 	D_RW(target)->sema = 0;
 	std::this_thread::yield();
 	goto RETRY;
@@ -301,35 +331,32 @@ RETRY:
     TOID(struct Segment)* s = D_RW(target)->Split(pop);
 DIR_RETRY:
     /* need to double the directory */
-    if(D_RO(target)->local_depth == D_RO(dir)->depth){
-	if(!D_RW(dir)->suspend()){
+    if(D_RO(target)->local_depth == mem_dir->depth){
+	if(!mem_dir->suspend()){
 	    std::this_thread::yield();
 	    goto DIR_RETRY;
 	}
 
-	x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
-	auto dir_old = dir;
-	TOID_ARRAY(TOID(struct Segment)) d = D_RO(dir)->segment;
-	TOID(struct Directory) _dir;
-	POBJ_ALLOC(pop, &_dir, struct Directory, sizeof(struct Directory), NULL, NULL);
-	POBJ_ALLOC(pop, &D_RO(_dir)->segment, TOID(struct Segment), sizeof(TOID(struct Segment))*D_RO(dir)->capacity*2, NULL, NULL);
-	D_RW(_dir)->initDirectory(D_RO(dir)->depth+1);
+	x = (f_hash >> (8*sizeof(f_hash) - mem_dir->depth));
+	auto dir_old = mem_dir;
+	TOID_ARRAY(TOID(struct Segment)) d = mem_dir->segment;
+	struct Directory* _dir = (struct Directory*)malloc(sizeof(struct Directory));
+        _dir->segment = (TOID(struct Segment)*)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+	_dir->initDirectory(mem_dir->depth+1);
 
-	for(int i=0; i<D_RO(dir)->capacity; ++i){
+	for(int i=0; i<mem_dir->capacity; ++i){
 	    if(i == x){
-		D_RW(D_RW(_dir)->segment)[2*i] = s[0];
-		D_RW(D_RW(_dir)->segment)[2*i+1] = s[1];
+		_dir->segment)[2*i] = s[0];
+		_dir->segment)[2*i+1] = s[1];
 	    }
 	    else{
-		D_RW(D_RW(_dir)->segment)[2*i] = D_RO(d)[i];
-		D_RW(D_RW(_dir)->segment)[2*i+1] = D_RO(d)[i];
+		_dir->segment)[2*i] = D_RO(d)[i];
+		_dir->segment)[2*i+1] = D_RO(d)[i];
 	    }
 	}
-
-	pmemobj_persist(pop, (char*)&D_RO(D_RO(_dir)->segment)[0], sizeof(TOID(struct Segment))*D_RO(_dir)->capacity);
-	pmemobj_persist(pop, (char*)&_dir, sizeof(struct Directory));
-	dir = _dir;
-	pmemobj_persist(pop, (char*)&dir, sizeof(TOID(struct Directory)));
+        mem_dir = _dir;
+        FlushMemDir(pop);
+	
 #ifdef INPLACE
 	D_RW(s[0])->local_depth++;
 	pmemobj_persist(pop, (char*)&D_RO(s[0])->local_depth, sizeof(size_t));
@@ -347,9 +374,9 @@ DIR_RETRY:
 	x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
 	if(D_RO(dir)->depth == D_RO(target)->local_depth + 1){
 	    if(x%2 == 0){
-		D_RW(D_RW(dir)->segment)[x+1] = s[1];
+		D_RW(mem_dir)->segment)[x+1] = s[1];
 #ifdef INPLACE
-		pmemobj_persist(pop, (char*)&D_RO(D_RO(dir)->segment)[x+1], sizeof(TOID(struct Segment)));
+		pmemobj_persist(pop, (char*)&D_RO(mem_dir->segment)[x+1], sizeof(TOID(struct Segment)));
 #else
 		mfence();
 		D_RW(D_RW(dir)->segment)[x] = s[0];
@@ -357,16 +384,16 @@ DIR_RETRY:
 #endif
 	    }
 	    else{
-		D_RW(D_RW(dir)->segment)[x] = s[1];
+		D_RW(mem_dir->segment)[x] = s[1];
 #ifdef INPLACE
-		pmemobj_persist(pop, (char*)&D_RO(D_RO(dir)->segment)[x], sizeof(TOID(struct Segment)));
+		pmemobj_persist(pop, (char*)&D_RO(mem_dir->segment)[x], sizeof(TOID(struct Segment)));
 #else
 		mfence();
 		D_RW(D_RW(dir)->segment)[x-1] = s[0];
 		pmemobj_persist(pop, (char*)&D_RO(D_RO(dir)->segment)[x-1], sizeof(TOID(struct Segment))*2);
 #endif
 	    }
-	    D_RW(dir)->unlock();
+	    mem_dir->unlock();
 
 #ifdef INPLACE
 	    D_RW(s[0])->local_depth++;
@@ -374,22 +401,27 @@ DIR_RETRY:
 	    /* release target segment exclusive lock */
 	    D_RW(s[0])->sema = 0;
 #endif
+            FlushMemDir(pop);
 	}
 	else{
-	    int stride = pow(2, D_RO(dir)->depth - target_local_depth);
+	    int stride = pow(2, mem_dir->depth - target_local_depth);
 	    auto loc = x - (x%stride);
 	    for(int i=0; i<stride/2; ++i){
-		D_RW(D_RW(dir)->segment)[loc+stride/2+i] = s[1];
+		D_RW(mem_dir->segment)[loc+stride/2+i] = s[1];
 	    }
 #ifdef INPLACE
-	    pmemobj_persist(pop, (char*)&D_RO(D_RO(dir)->segment)[loc+stride/2], sizeof(TOID(struct Segment))*stride/2);
+	    pmemobj_persist(pop, (char*)&D_RO(mem_dir->segment)[loc+stride/2], sizeof(TOID(struct Segment))*stride/2);
+            
+            // sync dir with segment[loc+stride/2]
+            D_RW(D_RW(dir)->segment)[loc+stride] = s[1];
+            pmemobj_persist(pop, (char*)&D_RO(mem_dir->segment)[loc+stride/2], sizeof(TOID(struct Segment)));
 #else
 	    for(int i=0; i<stride/2; ++i){
 		D_RW(D_RW(dir)->segment)[loc+i] = s[0];
 	    }
 	    pmemobj_persist(pop, (char*)&D_RO(D_RO(dir)->segment)[loc], sizeof(TOID(struct Segment))*stride);
 #endif
-	    D_RW(dir)->unlock();
+	    mem_dir->unlock();
 #ifdef INPLACE
 	    D_RW(s[0])->local_depth++;
 	    pmemobj_persist(pop, (char*)&D_RO(s[0])->local_depth, sizeof(size_t));
@@ -411,12 +443,12 @@ Value_t CCEH::Get(Key_t& key){
     auto f_idx = (f_hash & kMask) * kNumPairPerCacheLine;
 
 RETRY:
-    while(D_RO(dir)->sema < 0){
+    while(mem_dir->sema < 0){
 	asm("nop");
     }
 
-    auto x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
-    auto target = D_RO(D_RO(dir)->segment)[x];
+    auto x = (f_hash >> (8*sizeof(f_hash) - mem_dir->depth));
+    auto target = D_RO(mem_dir->segment)[x];
 
     if(!D_RO(target)){
 	std::this_thread::yield();
@@ -486,16 +518,18 @@ void CCEH::Recovery(PMEMobjpool* pop){
 	i += stride;
     }
     pmemobj_persist(pop, (char*)&D_RO(D_RO(dir)->segment)[0], sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+
+    ReadPMDir();
 }
 
 
 double CCEH::Utilization(void){
     size_t sum = 0;
     size_t cnt = 0;
-    for(int i=0; i<D_RO(dir)->capacity; ++cnt){
-	auto target = D_RO(D_RO(dir)->segment)[i];
-	int stride = pow(2, D_RO(dir)->depth - D_RO(target)->local_depth);
-	auto pattern = (i >> (D_RO(dir)->depth - D_RO(target)->local_depth));
+    for(int i=0; i<mem_dir->capacity; ++cnt){
+	auto target = D_RO(mem_dir->segment)[i];
+	int stride = pow(2, mem_dir->depth - D_RO(target)->local_depth);
+	auto pattern = (i >> (mem_dir->depth - D_RO(target)->local_depth));
 	for(unsigned j=0; j<Segment::kNumSlot; ++j){
 	    auto f_hash = h(&D_RO(target)->bucket[j].key, sizeof(Key_t));
 	    if(((f_hash >> (8*sizeof(f_hash)-D_RO(target)->local_depth)) == pattern) && (D_RO(target)->bucket[j].key != INVALID)){
@@ -509,9 +543,9 @@ double CCEH::Utilization(void){
 
 size_t CCEH::Capacity(void){
     size_t cnt = 0;
-    for(int i=0; i<D_RO(dir)->capacity; cnt++){
-	auto target = D_RO(D_RO(dir)->segment)[i];
-	int stride = pow(2, D_RO(dir)->depth - D_RO(target)->local_depth);
+    for(int i=0; i<mem_dir->capacity; cnt++){
+	auto target = D_RO(mem_dir->segment)[i];
+	int stride = pow(2, mem_dir->depth - D_RO(target)->local_depth);
 	i += stride;
     }
 
@@ -520,14 +554,14 @@ size_t CCEH::Capacity(void){
 
 // for debugging
 Value_t CCEH::FindAnyway(Key_t& key){
-    for(size_t i=0; i<D_RO(dir)->capacity; ++i){
+    for(size_t i=0; i<mem_dir->capacity; ++i){
 	for(size_t j=0; j<Segment::kNumSlot; ++j){
-	    if(D_RO(D_RO(D_RO(dir)->segment)[i])->bucket[j].key == key){
+	    if(D_RO(D_RO(mem_dir->segment)[i])->bucket[j].key == key){
 		cout << "segment(" << i << ")" << endl;
-		cout << "global_depth(" << D_RO(dir)->depth << "), local_depth(" << D_RO(D_RO(D_RO(dir)->segment)[i])->local_depth << ")" << endl;
-		cout << "pattern: " << bitset<sizeof(int64_t)>(i >> (D_RO(dir)->depth - D_RO(D_RO(D_RO(dir)->segment)[i])->local_depth)) << endl;
-		cout << "Key MSB: " << bitset<sizeof(int64_t)>(h(&key, sizeof(key)) >> (8*sizeof(key) - D_RO(D_RO(D_RO(dir)->segment)[i])->local_depth)) << endl;
-		return D_RO(D_RO(D_RO(dir)->segment)[i])->bucket[j].value;
+		cout << "global_depth(" << mem_dir->depth << "), local_depth(" << D_RO(D_RO(mem_dir->segment)[i])->local_depth << ")" << endl;
+		cout << "pattern: " << bitset<sizeof(int64_t)>(i >> (mem_dir->depth - D_RO(D_RO(mem_dir->segment)[i])->local_depth)) << endl;
+		cout << "Key MSB: " << bitset<sizeof(int64_t)>(h(&key, sizeof(key)) >> (8*sizeof(key) - D_RO(D_RO(mem_dir->segment)[i])->local_depth)) << endl;
+		return D_RO(D_RO(mem_dir->segment)[i])->bucket[j].value;
 	    }
 	}
     }

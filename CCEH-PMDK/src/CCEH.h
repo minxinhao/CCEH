@@ -184,6 +184,9 @@ class CCEH{
 	size_t Capacity(void);
 	void Recovery(PMEMobjpool*);
 
+        void ReadPMDir(void);
+        void FlushMemDir(PMEMobjpool* pop)
+
 	bool crashed = true;
     private:
 	TOID(struct Directory) dir;

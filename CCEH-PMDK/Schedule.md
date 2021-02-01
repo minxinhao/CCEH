@@ -146,6 +146,8 @@ The help functions that need to be added include:
 
 * Read directory from PM to memory cache mem_dir
 * Function to flush memory cache mem_dir to directory in PM
+  * To insure the failure-consistency in flushing, use a temp PM directory as inner-state.
+  * This brings an additional copy operation.
 
 ##### Changes In Directory
 
