@@ -207,7 +207,7 @@ void CCEH::initCCEH(PMEMobjpool* pop){
     mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
     struct Segment** temp = (struct Segment**)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
     TOID(struct Segment)* temp2 = (TOID(struct Segment)*)temp; 
-    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment))temp2;
+    mem_dir->segment = TOID_ARRAY(TOID(struct Segment))temp2;
     ReadPMDir();
 }
 
