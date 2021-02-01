@@ -185,7 +185,7 @@ class CCEH{
 	void Recovery(PMEMobjpool*);
 
         void ReadPMDir(void);
-        void FlushMemDir(PMEMobjpool* pop)
+        void FlushMemDir(PMEMobjpool* pop);
 
 	bool crashed = true;
     private:

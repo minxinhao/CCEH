@@ -171,7 +171,7 @@ TOID(struct Segment)* Segment::Split(PMEMobjpool* pop){
 }
 
 void CCEH::ReadPMDir(){
-        memcpy(mem_dir->segment,D_RO(D_RO(dir)->segment),sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+        memcpy(D_RM(mem_dir->segment),D_RO(D_RO(dir)->segment),sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
         mem_dir->capacity = D_RO(dir)->capacity;
         mem_dir->depth = D_RO(dir)->depth; //success flag
         mem_dir->sema = 0; //expect non-zero sema before this line to suspend other proccess
@@ -182,7 +182,7 @@ void CCEH::FlushMemDir(PMEMobjpool* pop){
     POBJ_ALLOC(pop, &_dir, struct Directory, sizeof(struct Directory), NULL, NULL);
     POBJ_ALLOC(pop, &D_RO(_dir)->segment, TOID(struct Segment), sizeof(TOID(struct Segment))*mem_dir->capacity, NULL, NULL);    
 
-    pmemobj_memcpy_persist(pop,D_RM(_dir)->segment,mem_dir->segment,sizeof(TOID(struct Segment))*mem_dir->capacity);
+    pmemobj_memcpy_persist(pop,D_RM(D_RM(_dir)->segment),D_RO(mem_dir->segment),sizeof(TOID(struct Segment))*mem_dir->capacity);
     D_RM(_dir)->capacity = mem_dir->capacity;
     D_RM(_dir)->depth = mem_dir->depth;
     D_RM(_dir)->sema = 0;
@@ -205,7 +205,7 @@ void CCEH::initCCEH(PMEMobjpool* pop){
     }
 
     mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
-    mem_dir->segment = (TOID(struct Segment)*)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment)))malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
     ReadPMDir();
 }
 
@@ -221,7 +221,7 @@ void CCEH::initCCEH(PMEMobjpool* pop, size_t initCap){
     }
 
     mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
-    mem_dir->segment = (TOID(struct Segment)*)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment)))malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
     ReadPMDir();
 }
 
@@ -341,17 +341,17 @@ DIR_RETRY:
 	auto dir_old = mem_dir;
 	TOID_ARRAY(TOID(struct Segment)) d = mem_dir->segment;
 	struct Directory* _dir = (struct Directory*)malloc(sizeof(struct Directory));
-        _dir->segment = (TOID(struct Segment)*)malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+        _dir->segment = (TOID_ARRAY(TOID(struct Segment)))malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
 	_dir->initDirectory(mem_dir->depth+1);
 
 	for(int i=0; i<mem_dir->capacity; ++i){
 	    if(i == x){
-		_dir->segment)[2*i] = s[0];
-		_dir->segment)[2*i+1] = s[1];
+		D_RW(_dir->segment)[2*i] = s[0];
+		D_RW(_dir->segment)[2*i+1] = s[1];
 	    }
 	    else{
-		_dir->segment)[2*i] = D_RO(d)[i];
-		_dir->segment)[2*i+1] = D_RO(d)[i];
+		D_RW(_dir->segment)[2*i] = D_RO(d)[i];
+		D_RW(_dir->segment)[2*i+1] = D_RO(d)[i];
 	    }
 	}
         mem_dir = _dir;
@@ -374,7 +374,7 @@ DIR_RETRY:
 	x = (f_hash >> (8*sizeof(f_hash) - D_RO(dir)->depth));
 	if(D_RO(dir)->depth == D_RO(target)->local_depth + 1){
 	    if(x%2 == 0){
-		D_RW(mem_dir)->segment)[x+1] = s[1];
+		D_RW(mem_dir->segment)[x+1] = s[1];
 #ifdef INPLACE
 		pmemobj_persist(pop, (char*)&D_RO(mem_dir->segment)[x+1], sizeof(TOID(struct Segment)));
 #else
