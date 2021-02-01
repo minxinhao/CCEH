@@ -171,7 +171,7 @@ TOID(struct Segment)* Segment::Split(PMEMobjpool* pop){
 }
 
 void CCEH::ReadPMDir(){
-        memcpy(D_RM(mem_dir->segment),D_RO(D_RO(dir)->segment),sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+        memcpy(D_RW(mem_dir->segment),D_RO(D_RO(dir)->segment),sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
         mem_dir->capacity = D_RO(dir)->capacity;
         mem_dir->depth = D_RO(dir)->depth; //success flag
         mem_dir->sema = 0; //expect non-zero sema before this line to suspend other proccess
@@ -182,11 +182,11 @@ void CCEH::FlushMemDir(PMEMobjpool* pop){
     POBJ_ALLOC(pop, &_dir, struct Directory, sizeof(struct Directory), NULL, NULL);
     POBJ_ALLOC(pop, &D_RO(_dir)->segment, TOID(struct Segment), sizeof(TOID(struct Segment))*mem_dir->capacity, NULL, NULL);    
 
-    pmemobj_memcpy_persist(pop,D_RM(D_RM(_dir)->segment),D_RO(mem_dir->segment),sizeof(TOID(struct Segment))*mem_dir->capacity);
-    D_RM(_dir)->capacity = mem_dir->capacity;
-    D_RM(_dir)->depth = mem_dir->depth;
-    D_RM(_dir)->sema = 0;
-    pmemobj_persist(pop,D_RM(_dir),sizeof(struct Directory));
+    pmemobj_memcpy_persist(pop,D_RW(D_RW(_dir)->segment),D_RO(mem_dir->segment),sizeof(TOID(struct Segment))*mem_dir->capacity);
+    D_RW(_dir)->capacity = mem_dir->capacity;
+    D_RW(_dir)->depth = mem_dir->depth;
+    D_RW(_dir)->sema = 0;
+    pmemobj_persist(pop,D_RW(_dir),sizeof(struct Directory));
 
     dir = _dir;
     pmemobj_persist(pop, (char*)&dir, sizeof(TOID(struct Directory)));
@@ -205,7 +205,7 @@ void CCEH::initCCEH(PMEMobjpool* pop){
     }
 
     mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
-    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment)))malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment)))((struct segment*)malloc(sizeof(TOID(struct Segment)))*D_RO(dir)->capacity);
     ReadPMDir();
 }
 
