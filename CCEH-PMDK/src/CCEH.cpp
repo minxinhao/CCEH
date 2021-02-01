@@ -205,7 +205,8 @@ void CCEH::initCCEH(PMEMobjpool* pop){
     }
 
     mem_dir = (struct Directory*)malloc(sizeof(struct Directory));
-    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment)))((struct Segment*)malloc(sizeof(TOID(struct Segment)))*D_RO(dir)->capacity);
+    TOID(struct Segment)* temp =malloc(sizeof(TOID(struct Segment)))*D_RO(dir)->capacity);
+    mem_dir->segment = (TOID_ARRAY(TOID(struct Segment))temp;
     ReadPMDir();
 }
 
@@ -341,7 +342,7 @@ DIR_RETRY:
 	auto dir_old = mem_dir;
 	TOID_ARRAY(TOID(struct Segment)) d = mem_dir->segment;
 	struct Directory* _dir = (struct Directory*)malloc(sizeof(struct Directory));
-        _dir->segment = (TOID_ARRAY(TOID(struct Segment)))malloc(sizeof(TOID(struct Segment))*D_RO(dir)->capacity);
+        _dir->segment = (TOID_ARRAY(TOID(struct Segment)))malloc(sizeof(TOID(struct Segment))*mem_dir->capacity);
 	_dir->initDirectory(mem_dir->depth+1);
 
 	for(int i=0; i<mem_dir->capacity; ++i){
